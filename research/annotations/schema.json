@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Minecraft Manhunt Strategy Annotation",
+  "type": "object",
+  "required": [
+    "source_url",
+    "pov",
+    "timestamp_start_seconds",
+    "role",
+    "situation",
+    "action",
+    "observed_outcome",
+    "confidence"
+  ],
+  "properties": {
+    "source_url": {
+      "type": "string",
+      "format": "uri"
+    },
+    "pov": {
+      "type": "string"
+    },
+    "timestamp_start_seconds": {
+      "type": "number",
+      "minimum": 0
+    },
+    "timestamp_end_seconds": {
+      "type": "number",
+      "minimum": 0
+    },
+    "role": {
+      "enum": [
+        "hunter",
+        "runner",
+        "both"
+      ]
+    },
+    "situation": {
+      "type": "string"
+    },
+    "action": {
+      "type": "string"
+    },
+    "observed_outcome": {
+      "type": "string"
+    },
+    "conditions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "confidence": {
+      "enum": [
+        "low",
+        "medium",
+        "high"
+      ]
+    },
+    "notes": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": false
+}

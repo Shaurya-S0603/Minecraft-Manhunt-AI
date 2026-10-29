@@ -1,0 +1,46 @@
+name: Source checks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python -m pip install pytest
+      - name: Run quickstart tests if imported
+        shell: bash
+        run: |
+          if [ -d quickstart/tests ]; then
+            python -m compileall -q quickstart
+            python -m unittest discover -s quickstart/tests -p 'test_*.py' -v
+          else
+            echo "::notice::v0.6 working source has not yet been imported. No application tests were run."
+          fi
+
+  node:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Test Node adapter if present
+        shell: bash
+        run: |
+          if [ -f bot-adapter-mineflayer/package-lock.json ]; then
+            cd bot-adapter-mineflayer
+            npm ci
+            npm test
+          else
+            echo "::notice::Node adapter has not yet been imported."
+          fi
