@@ -1,108 +1,81 @@
-**Current release: v0.7.16.** The recommended adaptive trainer is `training/launchers/TRAIN_ADAPTIVE_V4.bat`. Unlike the older cumulative V3 scheduler, it labels each new session, weighs recent comparable trials heavily, retains every old JSONL record, and requires current held-out validation for new live settings. The old `TRAIN_ALL_SKILLS.bat` is a legacy nonadaptive batch. Reports include `training_current_summary.csv`; see [v0.7.16 release notes](RELEASE_v0.7.16.md).
+# Minecraft Manhunt Hunter v1.2.1
 
-**New v0.7.15:** [Adaptive Curriculum and Research-Aware Weights](RELEASE_v0.7.15.md). Optional `training/launchers/TRAIN_ADAPTIVE_V3.bat` performs 1,000 **total** physical episodes. Mine AI metadata informs bounded scheduling, not movement rewards.
+**Minecraft Java Edition 1.21.11 · Fabric server · Carpet 1.4.194 · Python 3.10+ · Java 21**
 
-# Minecraft Manhunter AI — v0.7.14 Water Traversal Hotfix
+Play as the Runner against a single Survival-mode hunter. Dragon is the default format. Set `win_mode` to `hit` for the quick first-damage format. The controller runs on the same machine as the server. A stock 1.21.11 Java client can join.
 
-Minecraft **Java 1.21.11** · Windows · Python · Fabric/Carpet fake-player controller.
+## Manhunt learning
 
-This build **does not include Parkour School** or any third-party Minecraft world. The training server creates a basic isolated practice arena. Ordinary Manhunt is unchanged.
+The hunter learns whether to press or gear up during the opening, with results logged by match. You play the Runner in every live round. Use the inventory command to inspect real slots or explicitly hand off supplies. See [Phase 1 research](docs/v1.2/PHASE_1_RESEARCH.md), [Phase 2 inventory](docs/v1.2/PHASE_2_INVENTORY.md), [Phase 3 script and training](docs/v1.2/PHASE_3_MANHUNT.md), and [Phase 4 creator scripts](docs/v1.2/PHASE_4_VIDEO_CONCEPTS.md).
 
-## New in v0.7.14: stable water traversal
+## Traversal update
 
-- Suppress continuous jump in shallow, breathable water; preserve forward movement as the bot wades onto shore.
-- Stop cancelling held ascent during a vertical swim waypoint; apply switching hysteresis when submerged.
-- Fix surface-water waypoint arrival so slight differences in floating height do not trigger hundreds of one-step replans.
-- Add a real-position swim stall watchdog (3.5s) and safe replanning; the live learned swim offset is disabled on a detected stall.
-- End-of-match logs now include `swim-stalls` and `swim-mode-switches`. See `RELEASE_v0.7.14.md`.
-- Offline-tested only; does not imply the bot has already passed a real Minecraft river or ocean test.
+The hunter can commit to a single flat bridge lane for up to six blocks. It checks for a reachable bank, clear headroom and enough usable blocks before starting. It places each block with normal Survival inputs, checks the block and inventory cost, then walks onto it before placing the next one. Vines and ladders have a held ascent with a checked exit onto the ledge. Pillaring stays active during the jump so a close target cannot interrupt block placement in mid-air.
 
-## New in v0.7.13: escape empty-route deadlocks without blind movement
+## Install and play
 
-- An A* scan can visit many safe cells but return **0 steps** when none is closer to the current target (for example, behind a broad wall). After one empty scan, the next plan may take a *verified sideways detour* through previously observed, walkable cells.
-- Each detour uses the existing collision and hazard checks, and attempted detour endpoints are temporarily blacklisted. The planner limits attempts to **four distinct detours per 30-second/goal region**. If nothing safe exists, it still stops.
-- `zero-route`, `verified-detours`, and tactical-feedback skip counters are included in end-of-match navigation diagnostics.
-- The strategy learner discards unexecutable targets and ignores separation changes if the bot itself moved less than 0.6 blocks. **Legacy v1 tactical policy scores are preserved but not trusted.** Verified feedback saves as `runtime/strategy/tactical_policy_hunter_v2.json` or `tactical_policy_runner_v2.json`.
-- Existing real movement trial policies, imported Mine AI research records, and map/world files are unchanged. Run `reports/STRATEGY_REPORT.bat` to inspect fresh v2 learning.
-- This recovery is a short-horizon local detour, **not** global obstacle navigation or long-range terrain mapping. Real Minecraft validation is still required.
+1. Extract this ZIP into a new folder and open a terminal there. Make sure `java -version` reports Java 21 and Python is on PATH.
+2. Run `python -m quickstart.hunter_v1.cli play --setup-only` to download the version-targeted Fabric launcher and verify Carpet's download checksum. First launch may download additional Mojang and Fabric runtime libraries. The controller runs from source. To rebuild the distribution ZIP, run `python build_v1.py`.
+3. Run `python -m quickstart.hunter_v1.cli play --runner YourMinecraftName`. On Windows, double-click `manhunt/START_HUNTER_V1.bat` for automatic Runner selection, or pass `--runner YourMinecraftName` to it.
+4. Review and accept the Minecraft EULA when prompted. Join `localhost:25565` in a Java 1.21.11 client. Start on open Overworld ground. The default head start is 20 seconds.
+5. After a result, `/trigger mh_replay` or console `R` starts another round. Console `Q` or Ctrl+C stops the server. If a Runner has already completed Free the End in this world, stop the server and move its `world` folder to a backup location before starting another dragon campaign.
 
-## Retained from v0.7.12: bounded strategic AI
+The normal server resides at `runtime/hunter-v1/server/`, uses authenticated human logins, and binds to localhost. It uses game port 25565 and local RCON port 25575. Stop an older Manhunt server before opening the same ports. The movement trainer is documented in [training/README.md](training/README.md). To reuse your existing movement calibration, copy the old `runtime/movement_training/` into this extraction while the old server is stopped. The hunter reads certified settings when present. With the server stopped, copy your backed-up playbook and world into the same runtime paths in this extraction. The bundled config defaults water bridging to off. If your v1.2 config selected the human Hunter role, delete the old `game.human_role` key before reusing it.
 
-- Hunter can use short, observed-velocity interception; Runner can use stable, angled escapes. Existing terrain, movement and combat guardrails remain authoritative.
-- Each role learns a conservative **local separation-change** tactic score from your own matches, stored in `runtime/strategy/`.
-- A safe, **optional** import tool creates an observational index of Mine AI MCP's published action traces (CC BY 4.0); **no pretrained movement weights** are included or claimed.
-- Gemini 4 Argon's public Minecraft research informs goal persistence and error-recovery design, but **no public model or training trace was imported**.
-- `MANHUNT_STRATEGY=0` disables these new target choices. See `RELEASE_v0.7.12.md` and `research/strategy/README.md`.
+## Architecture
 
-## Start here
+| Module | Role |
+|---|---|
+| `hunter_v1/cli.py` and `settings.py` | Install, launch, local lobby, isolated benchmarks, validated config and metrics reporting. |
+| `hunter_v1/game.py` | Round objective, head start, death/respawn, progress metadata and behavior priority. |
+| `hunter_v1/bridge.py` and `mh_hunter_v1.sc` | Carpet controls, read-only world/player sensing, pickup events and guarded same-tick item transactions. |
+| `hunter_v1/director.py` and `inventory.py` | Opening policy, round points, inventory views, and verified handoffs. |
+| `hunter_v1/pursuit.py` and `learning.py` | Bearing/LOS boundary, rolling goals, verified interception and route feedback, atomic versioned playbook. |
+| `hunter_v1/supply.py` and `recipes.py` | Native food, gear, local visible gathering/mob/dropped-item objectives and a limited recipe catalogue. |
+| `hunter_v1/traverse.py` | Committed bridge lanes, physical pillar placement, ladder and vine ascent, observed portals, and dimension handoff. |
+| Existing `quickstart/match.py`, `pathfinding3d.py`, `terrain.py`, `swimming.py` and `jump_control.py` | Rolling 3D search, physically calibrated sprint-jumps, climbing, short detours, water and air safety. |
+| `hunter_v1/scenarios.py` | Disposable fixed-seed fixtures and a scripted Survival runner. |
+| `quickstart/tests/test_hunter_v1.py` | Offline checks covering information limits, learning, crafting, build guards and metrics. |
 
-| Goal | Launcher |
-| --- | --- |
-| All five basic courses (1000 real episodes/course) | `training/launchers/TRAIN_ALL_SKILLS.bat` |
-| **Corrected jump diagnostics (100 each)** | **`training/launchers/TRAIN_CORRECTED_JUMPS.bat`** |
-| One-, two-, three-block jumps | `training/launchers/TRAIN_JUMPING.bat` |
-| Basic underwater swimming | `training/launchers/TRAIN_SWIMMING.bat` |
-| Ladder climbing | `training/launchers/TRAIN_CLIMBING.bat` |
-| Fit all learned parameters from recorded trials | `training/launchers/TRAIN_MODEL.bat` |
-| Detailed progress/diagnostics | `reports/VIEW_REPORT.bat` |
-| Inspect strategy learning | `reports/STRATEGY_REPORT.bat` |
-| Import public Minecraft agent trace (research-only) | `training/launchers/IMPORT_MINEAI_TRACE.bat` |
-| Manhunt, you are Runner | `manhunt/START_AS_RUNNER.bat` |
-| Manhunt, you are Hunter | `manhunt/START_AS_HUNTER.bat` |
-| Run offline tests | `RUN_TESTS.bat` |
+Normal action priorities are emergency air, an ongoing wall ascent or pillar jump, close melee, bridge or portal traversal, bounded provisioning, then rolling chase. Coordinates go to pursuit only from close, terrain-checked sight; the compass outside sight supplies a quantized heading. Both reuse the rolling A* planner and native movement. Runner progression uses vanilla advancements and the current dimension. The hunter uses its actual carried items and the same damage, gravity and hunger mechanics as a Survival player.
 
+Carpet lacks a full native crafting GUI controller. For the small supported recipe list, Scarpet checks real input slots and amounts and an empty output slot before updating them in one server call. Recipes requiring a crafting table check a nearby table. Slot swaps preserve stack components. The standard 2×2 recipes produce sticks, planks, tables and flint and steel. Table recipes cover wooden and stone tools and leather armor. Harvest, pickup, placement, melee and food use are physical Minecraft actions.
 
-## New in v0.7.11: Corrected platform scoring and experimental braking
+## Configuration
 
-- The jump trainer now scores **actual grounded landings anywhere within the verified landing platform**, not only near the first block's centre.
-- Reports distinguish **legacy point-scored records** from corrected v2 trials, and classify overshoots, undershoots, lateral misses, missed takeoff and falling below the platform.
-- Platform-aware jump timing+braking candidates are learned from **new real Minecraft trials** and saved in `runtime/movement_training/jump_policy_v2.json`. The previous 5050 trial records remain untouched for auditing.
-- Run `training/launchers/TRAIN_CORRECTED_JUMPS.bat` for **100 new trials on each of the 3 gap courses**; then run `reports/VIEW_REPORT.bat`.
-- Keep the old policies: corrected trials are required for new certification. **Braking is currently training-only**; tested takeoff offsets can be used after validation.
-- See `RELEASE_v0.7.11.md` for installation steps and verified open-source Minecraft-completion-agent research.
+Edit `config/hunter_v1.json` or supply `--config path/to/hunter.json`.
 
-## Retained from v0.7.10: live Manhunt transfer of validated swimming and climbing settings
+| Section | Options and defaults |
+|---|---|
+| Game | `win_mode=dragon`, `head_start_seconds=20`, `time_limit_seconds=3600`, `respawn_seconds=12`, `hunter_respawns=5`. Dragon mode ends on the Runner's Free the End advancement, Runner death, hunter respawn limit or time limit. Hit mode scores the first verified hunter damage, or the Runner wins on timeout or exhausted hunter respawns. Runner death before a hit aborts hit mode. |
+| Tracking | `range_blocks=512`, `sample_seconds=4`, `visible_blocks=24`, `trail_seconds=32`. Compass-style samples use 15° headings in the current dimension. A visible Runner may be pursued precisely. Terrain checks, occlusion and policy scope still apply. This is an AI sensor, so no custom player compass item is installed. |
+| Resources | `enabled=true`, `crafting=true`, `safe_distance=22`, `build=true`, `water_bridge=false`, `lava_bridge=false`, `allow_transfers=false`. The last setting enables local operator transfers and drops. Enable water bridging to prefer a checked bridge over swimming when approaching a suitable lane. Lava bridging requires a full span of carried nonflammable blocks. |
+| Learning | `enabled=true`, `rate=0.20`, `max_entries=256`, `exploration=0.25`, `opening_seconds=9`, `tag_bonus_seconds=45`. Set `enabled=false` for the same controller without the playbook or `exploration=0` to prefer measured values. |
+| Scoring | `win=3`, `loss=0`, `first_tag=1`. Scores are separated by role. |
 
-- No extra training command is required: the all-skills trainer periodically writes `skill_policy.json` from real completed episodes. The Manhunt controller loads the latest complete snapshot when a match starts.
-- **Horizontal swimming only:** the learned look-target pitch offset is applied on level swim segments with healthy air. Emergency surfacing, low air, and vertical ascent/descent always use existing safety controls.
-- **Ladders only:** the learned climbing aim height is applied when a real ladder is detected in the observed nearby blocks. Vines and other climbing blocks keep their original settings until trained separately.
-- Stuck recovery disables the relevant learned setting for the current match, reverting to standard controls. Training data and model files are never changed during a Manhunt game.
-- `reports/CHECK_LIVE_SKILLS.bat` displays the eligibility of the actual checkpoint you installed. For urgent manual rollback, set `MANHUNT_LIVE_SKILLS=0` before launching Manhunt.
-- **Do not interrupt an ongoing training session.** After its 1,000-episode courses complete, stop the training server, back up `runtime/movement_training`, then copy that directory into this new version. Start a new Manhunt round to load the completed checkpoint.
-- **Offline validation only:** successful training on a basic swim or ladder arena does not guarantee transfer to wild terrain. Retain your training report for analysis.
+Normal play uses no catch-up teleport, force-loaded tracking chunks, health buffs or free supplies. The controller places the bot at a checked start, and a confirmed death allows a delayed respawn at the same round anchor. The scripted fixture setup explicitly edits only its own disposable world and repositions the bot before play. The craft transaction is limited to cost-checked recipes and can be disabled in config.
 
-## Training setup
+## Learning and metrics
 
-1. Run `manhunt/INSTALL_SERVER_ONLY.bat` if Minecraft Fabric/Carpet is not installed yet.
-2. Start `training/launchers/TRAIN_ALL_SKILLS.bat`.
-3. Join **127.0.0.1:25566** with your authenticated Minecraft Java 1.21.11 account. Carpet switches your player to an AI-controllable shadow player; your client disconnects once. This is expected.
-4. The trainer cycles through 3 gap courses, 1 swim course and 1 ladder course, **1000 attempts each = 5000 physical attempts**. It records true Minecraft positions. `Ctrl+C` interrupts safely.
-5. The system updates its skill policies every 100 attempts and at the end. Use `reports/VIEW_REPORT.bat` after a run.
+The live playbook is `runtime/hunter-v1/playbook.json`. Benchmark train and held-out runs use `runtime/hunter-v1-benchmark/playbook.json`. Held-out runs read it without updating it. Schema 1 maps context and action to trial count, exponentially averaged value and last-use order. Contexts include hunter opening readiness, an observed runner motion pattern, a local route edge, or a re-observed portal scoped to its world and dimension. World locations are never navigated from the playbook alone. It stores no executable code. Scores are bounded, old records are pruned and replacement is atomic. An unreadable or unfamiliar schema is preserved.
 
-**Episodes vs epochs:** One physical episode means one actual Minecraft attempt. A model-training epoch means replaying recorded data through a learning algorithm. The current controller uses outcome-based contextual bandits, so 1000 genuine trials per course is the useful parameter, not 1000 arbitrary gradient epochs. Thousands of physical attempts are **not instant** and may take several hours; trial duration, RCON and world tick speed dominate.
+To reset a playbook, stop the associated controller and rename its `playbook.json` to a backup name. This leaves match logs and movement calibration available. To run a fresh A/B comparison, archive the benchmark JSONL and start a new series with the same held-out inputs and a configuration copy with learning switched off.
 
-You may use CLI commands instead to start a shorter experiment:
+Each round appends one schema 1 row to `rounds.jsonl` in its data folder. It records the winner/reason, first verified hit time, sampled physical hunter distance, observed pickup counts, crafted items, deaths, respawns, confirmed placed blocks, completed bridge crossings and wall ascents, portal transfers, navigation failures, opening decisions, and points. Pickup counts come from Carpet's native pickup event. Crafted items are recorded separately. Aborted rounds are reported outside the completed-round win rate.
 
-```powershell
-python -m quickstart.training_server --skills all --episodes 50 --interleave
-python -m quickstart.training_server --skills all --episodes 1000 --interleave
-python -m quickstart.arena_report
+## Training and tests
+
+```sh
+python -m unittest discover -s quickstart/tests -q
+python -m quickstart.hunter_v1.cli scenario --scenario turns --seed 7442 --split train --rounds 3
+python -m quickstart.hunter_v1.cli scenario --scenario turns --seed 9001 --split held-out --rounds 3
+python -m quickstart.hunter_v1.cli report --split held-out --scenario turns --mode hit
 ```
 
-## Model and reports
+The scenario server uses local ports 25567/25577 and generates a fresh disposable world per invocation. The scripted runner is a benchmark fixture. The fixture runner and the AI Hunter use offline IDs in that isolated process. Fixtures cover straight pursuit, turns, a one-block gap, a river, ladders, vines, pillaring, supplies, dry/water/lava bridges, and a Nether portal. The `water-bridge` and `lava-bridge` fixtures enable their respective settings for that benchmark only. The physical movement trainer is available through `training/launchers/TRAIN_ADAPTIVE_V4.bat` or its documented CLI. Benchmark training updates chase tactics and route feedback, while the movement arena calibrates physical controls. [Test protocol and pass criteria](docs/v1/TESTING.md) · [Baseline review](docs/v1/BASELINE.md)
 
-- Real data: `runtime/movement_training/trials.jsonl` (jump trajectories), `runtime/movement_training/arena_episodes.jsonl` (all skills).
-- Fitted jump timing: `runtime/movement_training/policy.json` (live Manhunt may use verified gap/offset thresholds).
-- Fitted swim/climb action parameters: `runtime/movement_training/skill_policy.json` (read-only snapshot loaded by normal Manhunt **only if** each trained skill passes >=8 eligible attempts, >=6 successes and >=75% selected-option success). Otherwise standard controls are used.
-- Reports: `reports/generated/training_report.md`, `training_report.json`, `training_summary.csv`.
-- Each report includes early vs recent success rates, 95% intervals, failure causes, mean attempt time, model settings and specific improvement recommendations.
+## Version details and limits
 
-See `training/README.md`, `reports/README.md` and `DIRECTORY_MAP.md`.
+This release uses 1.21.11 Java commands, read-only player state, Carpet fake-player movement and Scarpet inventory callbacks. Examples for earlier versions often use pre-component item NBT, older equipment commands, and old gamerule names. The 1.21.11 fixtures use `minecraft:spawn_mobs` and `minecraft:advance_time`. Fabric 1.21.11 still uses its remapped mod ecosystem. Earlier 1.21.x builds, Paper/Spigot and 26.x are outside the tested target. [Mojang 1.21.11 release notes](https://www.minecraft.net/en-us/article/minecraft-java-edition-1-21-11) · [Fabric 1.21.11 notes](https://fabricmc.net/2025/12/05/12111.html) · [Carpet release](https://modrinth.com/mod/carpet)
 
-## Safety and scope
-
-Training runs on **127.0.0.1:25566**, separate from normal Manhunt **127.0.0.1:25565**. The training world is generated in `runtime/training-server-data/world` and never alters `runtime/server-data` or saved Manhunt worlds. Minecraft is run with online authentication; RCON is local-only.
-
-The release contains **no trained live checkpoints or pre-recorded gameplay results**. Policies are generated using your own game sessions. Back up `runtime/movement_training/` before updating.
-
-**GitHub is not updated.** v0.7.14 is a chat-only experimental build; the approved GitHub version ceiling remains v0.6.
+Long pursuits use rolling local A*, so large walls and complex cave networks can still lose the trail. Automatic bridging is limited to straight, same-height lanes with a visible landing predicted from local blocks. The held ascent applies to short ladder or vine walls with a checked ledge. Portal following uses seen entrances. Autonomous Stronghold discovery and the full Nether technology chain remain future work. It does not yet support bows, shield tactics, furnaces, container looting, multi-hunter coordination or learned ambush placement. The baseline review describes references that already offer some of these features. Live physics coverage and remaining release work are recorded in [TESTING.md](docs/v1/TESTING.md).

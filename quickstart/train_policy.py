@@ -40,7 +40,7 @@ def main(argv=None):
     policy=train_from_log(args.data)
     if not policy['records']:
         print('[MODEL] No verified real Minecraft jump trials found. No policy written.')
-        print('[MODEL] Run training/launchers/TRAIN_ALL_SKILLS.bat to record physical movement first.')
+        print('[MODEL] Run training/launchers/TRAIN_ADAPTIVE_V4.bat to record physical movement first.')
         # Still train swim/climb even with no successful jump attempts.
         extra=train_skill_policy(args.data.parent/'arena_episodes.jsonl')
         if extra['episodes']:

@@ -1,5 +1,9 @@
 """Offline tests for the v0.3 post-match lifecycle and Minecraft result overlay."""
+import contextlib
+import io
 import json
+from pathlib import Path
+from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import Mock, patch
 
@@ -45,15 +49,13 @@ class OverlayTests(unittest.TestCase):
 class LobbyTests(unittest.TestCase):
     def test_parse_score(self):
         self.assertEqual(parse_score('Alex has 1 [mh_replay]'),1)
-        self.assertEqual(parse_score('Alex has 0 [mh_switch]'),0)
+        self.assertEqual(parse_score('Alex has 0 [mh_replay]'),0)
         self.assertIsNone(parse_score('No score for Alex'))
 
-    def test_trigger_switch_from_minecraft(self):
+    def test_trigger_replay_from_minecraft(self):
         def server_response(command):
-            if command.endswith('get Alex mh_switch'):
-                return 'Alex has 1 [mh_switch]'
             if command.endswith('get Alex mh_replay'):
-                return 'Alex has 0 [mh_replay]'
+                return 'Alex has 1 [mh_replay]'
             return 'OK'
         rcon=Mock()
         rcon.command.side_effect=server_response
@@ -61,11 +63,11 @@ class LobbyTests(unittest.TestCase):
         lobby.setup()
         lobby.prepare_player('Alex')
         action=lobby.wait_for_next_round('Alex',poll_seconds=0)
-        self.assertEqual(action,'switch')
+        self.assertEqual(action,'replay')
         calls=[x.args[0] for x in rcon.command.call_args_list]
         self.assertIn('scoreboard objectives add mh_replay trigger',calls)
-        self.assertIn('scoreboard objectives add mh_switch trigger',calls)
-        self.assertIn('scoreboard players enable Alex mh_switch',calls)
+        self.assertIn('scoreboard players enable Alex mh_replay',calls)
+        self.assertFalse(any('mh_switch' in x for x in calls))
         self.assertFalse(any(x in ('stop','kill @a') for x in calls))
 
     def test_console_quit_intentionally_shuts_down(self):
@@ -103,37 +105,52 @@ class MatchCleanupTests(unittest.TestCase):
 
 
 class LauncherLifecycleTests(unittest.TestCase):
-    def test_server_is_kept_alive_for_replay_and_role_switch(self):
+    def test_live_replay_runs_another_hunter_round_on_the_same_server(self):
+        from quickstart.hunter_v1 import cli
+        from quickstart.hunter_v1.game import Metrics
+
+        proc = Mock()
+        proc.poll.return_value = None
+        rcon = Mock()
+        rcon.command.return_value = "OK"
+        match = Mock(player="Alex")
+        match.players.return_value = ["Alex"]
+        match.metrics = Metrics(result="hunter", reason="confirmed_hit", points={"hunter": 4, "runner": 0})
+        lobby = Mock()
+        lobby.poll_action.side_effect = ["replay", "quit"]
+        with TemporaryDirectory() as temp:
+            live = Path(temp)
+            server = live / "server"
+            (server / "logs").mkdir(parents=True)
+            (server / "world").mkdir()
+            (server / "logs" / "latest.log").write_text("Starting minecraft server version 1.21.11")
+            with patch.multiple(cli, LIVE=live, local_port_open=Mock(return_value=False),
+                                java_executable=Mock(return_value="java"), ensure_properties=Mock(return_value={}),
+                                install_fabric=Mock(), install_mod=Mock(), eula_agreement=Mock(),
+                                start_server=Mock(return_value=(proc, None)), wait_for_rcon=Mock(return_value=rcon),
+                                stop_server=Mock(), HunterGame=Mock(return_value=match),
+                                Lobby=Mock(return_value=lobby)), contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(cli.main(["play", "--runner", "Alex", "--win-mode", "hit"]), 0)
+                self.assertEqual(cli.HunterGame.call_count, 2)
+                self.assertTrue(all(call.kwargs["runner"] == "Alex" for call in cli.HunterGame.call_args_list))
+                self.assertTrue(all(call.args[1]["game"]["win_mode"] == "hit"
+                                    for call in cli.HunterGame.call_args_list))
+                self.assertEqual(match.run_v1.call_count, 2)
+                cli.start_server.assert_called_once()
+                cli.stop_server.assert_called_once_with(proc)
+            self.assertEqual(len((live / "rounds.jsonl").read_text().splitlines()), 2)
+
+    def test_retired_role_option_is_rejected_by_both_launchers(self):
         from quickstart import launch
-        p=Mock()
-        p.poll.return_value=None
-        rcon=Mock()
-        roles=[]
-        def fake_match(rcon,role,head_start,survival_seconds):
-            game=Mock()
-            game.player='Alex'
-            game.game_duration=25.0
-            game.result_reason='tag'
-            game.run.return_value='hunter'
-            roles.append(role)
-            return game
-        lobby=Mock()
-        lobby.wait_for_next_round.side_effect=['replay','switch','quit']
-        with patch.object(launch,'prepare',return_value='java'), \
-             patch.object(launch,'ensure_properties',return_value={}), \
-             patch.object(launch,'start_server',return_value=(p,None)), \
-             patch.object(launch,'wait_for_rcon',return_value=rcon), \
-             patch.object(launch,'stop_server') as stop, \
-             patch.object(launch,'ManhuntMatch',side_effect=fake_match), \
-             patch.object(launch,'Lobby',return_value=lobby), \
-             patch.object(launch,'show_round_result') as overlay:
-            result=launch.main(['--role','runner','--head-start','0'])
-            self.assertEqual(result,0)
-            self.assertEqual(roles,['runner','runner','hunter'])
-            self.assertEqual(overlay.call_count,3)
-            # Server is stopped only after explicit user 'quit'.
-            self.assertEqual(stop.call_count,1)
-            self.assertEqual(lobby.wait_for_next_round.call_count,3)
+        from quickstart.hunter_v1 import cli
+
+        for entry in (cli.main, lambda args: launch.main(args[1:])):
+            with self.subTest(entry=entry), contextlib.redirect_stderr(io.StringIO()) as error:
+                with self.assertRaises(SystemExit) as result:
+                    entry(["play", "--role", "hunter"])
+                self.assertEqual(result.exception.code, 2)
+                self.assertIn("unrecognized arguments: --role hunter", error.getvalue())
+
 
 class HistoryTests(unittest.TestCase):
     def test_writes_anonymous_rounds_with_session_score(self):

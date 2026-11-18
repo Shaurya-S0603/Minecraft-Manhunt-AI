@@ -1,7 +1,0 @@
-# Explanation-only placeholder: Agent difficulty tuning
-# No actual TOML keys, dotenv assignments, credentials, or settings are provided.
-# Tracking frequency and location accuracy for each mode.
-# Planning budget, path length horizon, reaction cadence.
-# Limits on recovery attempts and decision latency.
-# Difficulty should not silently grant hidden information.
-# Implementation task: create real settings and validation after establishing the data contracts.

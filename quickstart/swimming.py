@@ -6,11 +6,12 @@ import time
 from .observations import Position
 from .terrain import terrain_type, TerrainUnavailable
 
-_AIR_PATTERN = re.compile(r'MHAIR:([0-9]+):END')
+_AIR_PATTERN = re.compile(r'MHAIR:(-?[0-9]+):END')
 
 class WaterSurvival:
-    def __init__(self, rcon, sensor, bot: str = 'ManhuntBot', clock=time.monotonic):
+    def __init__(self, rcon, sensor, bot: str = 'ManhuntBot', clock=time.monotonic, *, rescue_effect=True):
         self.rcon, self.sensor, self.bot, self.clock = rcon, sensor, bot, clock
+        self.rescue_effect = rescue_effect
         self.swimming = False
         self.last_air_check = 0.0
         self.last_air = 300
@@ -149,7 +150,7 @@ class WaterSurvival:
             print(f'[SWIM] Mode={vertical:+d}, head_submerged={self.head_submerged}, air={air}.')
         # A short effect is a controlled fail-safe, NOT proof of successful swimming.
         # At 20 ticks/s, 65 ticks gives time to turn around before drowning.
-        if air < 65 and now-self.last_insurance>10:
+        if self.rescue_effect and air < 65 and now-self.last_insurance>10:
             response=self.rcon.command(f'effect give {self.bot} minecraft:water_breathing 12 0 true')
             if 'unknown' not in response.lower() and 'failed' not in response.lower():
                 self.emergency_count+=1

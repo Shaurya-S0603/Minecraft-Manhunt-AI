@@ -2,7 +2,7 @@
 setlocal
 cd /d "%~dp0..\.."
 echo ===========================================================
-echo  MANHUNTER v0.7.16 - GENERATION-AWARE MOVEMENT CURRICULUM
+echo  MANHUNTER v8.0.2 - GENERATION-AWARE MOVEMENT CURRICULUM
 echo  1000 TOTAL Minecraft trials across all five courses.
 echo  Creates a new session; past training logs are NOT deleted.
 echo  Every fifth attempt is reserved for same-arena validation.

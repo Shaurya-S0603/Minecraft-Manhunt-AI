@@ -4,13 +4,6 @@
 **/node_modules/
 **/.venv/
 oracleJdk-25/
-runtime/server-data/
-runtime/training-server-data/
-runtime/movement_training/
-runtime/strategy/
-runtime/backups/
-runtime/logs/
-runtime/toy_experiments/
 reports/generated/*
 !reports/generated/.gitkeep
 *.log
@@ -18,3 +11,6 @@ reports/generated/*
 *.7z
 .DS_Store
 Thumbs.db
+
+runtime/
+.env

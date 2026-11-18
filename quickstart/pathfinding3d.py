@@ -62,6 +62,7 @@ class BoundedAStar:
         self.max_scan_blocks = max_scan_blocks
         self.max_gap = max(1,min(int(max_gap),3))
         self.gap_risk: dict[int,float] = {}
+        self.edge_penalty = None
         self.clock = clock
         self.blocked: dict[Node, float] = {}
 
@@ -259,9 +260,32 @@ class BoundedAStar:
                 winner, highest = node, score
         return winner
 
+    def _best_escape(self, blocks, visited, start, threat, dist, exclude):
+        """Choose an observed reachable endpoint, not a fabricated escape goal.
+
+        Prefer meaningful separation and dry ground; lateral movement is
+        allowed when terrain blocks a direct retreat. Use only A* predecessors.
+        """
+        old=math.hypot(start[0]+.5-threat.x,start[2]+.5-threat.z)
+        choices=[]
+        for node in sorted(visited):
+            if node == start or node not in dist:
+                continue
+            x,y,z=node
+            displacement=math.hypot(x-start[0],z-start[2])
+            if displacement<2: continue
+            if any(math.hypot(x-e[0],z-e[2])<2 and abs(y-e[1])<=1 for e in exclude):
+                continue
+            gain=math.hypot(x+.5-threat.x,z+.5-threat.z)-old
+            wet=self._passable(blocks,node) is True
+            score=2.0*gain+.35*displacement-.16*dist[node]-(1.4 if wet else 0)-.15*abs(y-start[1])
+            choices.append((score,node))
+        return max(choices)[1] if choices else None
+
     def plan(self, origin: Position, goal: Position, *, avoid_water: bool = False,
              allow_detour: bool = False,
-             detour_exclude: frozenset[Node] = frozenset()) -> RoutePlan:
+             detour_exclude: frozenset[Node] = frozenset(),
+             escape_from: Position | None = None) -> RoutePlan:
         observed_start = (math.floor(origin.x),math.floor(origin.y),math.floor(origin.z))
         target = (math.floor(goal.x),math.floor(goal.y),math.floor(goal.z))
         blocks, size = self._grid(observed_start)
@@ -358,6 +382,8 @@ class BoundedAStar:
                         continue  # An unobserved landing can never be preferred.
                     if support.endswith('_leaves') or support.endswith('_wart_block'):
                         weight += 3.5
+                    if self.edge_penalty is not None:
+                        weight += self.edge_penalty(node, nxt)
                     nd=dist[node]+weight
                     if nd < dist.get(nxt,float('inf')):
                         dist[nxt]=nd
@@ -365,7 +391,8 @@ class BoundedAStar:
                         heapq.heappush(frontier,(nd + self._h(nxt,target),next(counter),nxt))
         used_detour = False
         if best == start and allow_detour:
-            candidate = self._best_detour(visited,start,target,dist,detour_exclude)
+            candidate = (self._best_escape(blocks,visited,start,escape_from,dist,detour_exclude)
+                         if escape_from is not None else self._best_detour(visited,start,target,dist,detour_exclude))
             if candidate is not None:
                 best = candidate
                 used_detour = True

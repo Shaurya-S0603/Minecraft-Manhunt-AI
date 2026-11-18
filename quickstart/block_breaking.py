@@ -52,10 +52,10 @@ class BlockBreaker:
                     cells.append((x,yy,z))
         return cells
 
-    def try_start(self, bot: Position, goal: Position, now: float, *, stop_movement) -> bool:
+    def try_start(self, bot: Position, goal: Position, now: float, *, stop_movement, allowed_blocks=None, exact=None, extra_blocks=()) -> bool:
         if self.operation or now < self.cooldown_until:
             return False
-        cells=self._candidates(bot,goal)
+        cells=[exact] if exact is not None else self._candidates(bot,goal)
         if not cells:
             return False
         # Confirm surroundings, support and potential falling liquids above.
@@ -71,7 +71,7 @@ class BlockBreaker:
         blocks=self.sensor.read(coords)
         for x,y,z in cells:
             block=blocks[(x,y,z)]
-            if not mineable(block):
+            if not (mineable(block) or block in extra_blocks) or (allowed_blocks is not None and block not in allowed_blocks):
                 continue
             if math.sqrt((x+.5-bot.x)**2+(y+.5-(bot.y+1.6))**2+(z+.5-bot.z)**2)>3.5:
                 continue
@@ -86,8 +86,31 @@ class BlockBreaker:
                 continue
             if terrain_type(blocks[(x,y-1,z)]) == 'air':
                 continue
+            aim=(x+.5,y+.5,z+.5)
+            if exact is not None:
+                # Aim just inside an exposed side face rather than at the
+                # block centre. A downward ray to the centre of a bottom log
+                # can hit the log immediately above it first.
+                a=(bot.x,bot.y+1.62,bot.z)
+                candidates=[]
+                if bot.x < x: candidates.append((x+.03,y+.62,z+.5))
+                if bot.x > x+1: candidates.append((x+.97,y+.62,z+.5))
+                if bot.z < z: candidates.append((x+.5,y+.62,z+.03))
+                if bot.z > z+1: candidates.append((x+.5,y+.62,z+.97))
+                candidates.append(aim)
+                aim=None
+                for b in candidates:
+                    n=max(2,math.ceil(math.dist(a,b)/.10))
+                    ray=list(dict.fromkeys(tuple(math.floor(a[j]+(b[j]-a[j])*i/n) for j in range(3)) for i in range(1,n)))
+                    ray=[p for p in ray if p!=(x,y,z)]
+                    observed=self.sensor.read(ray)
+                    if all(terrain_type(observed[p])=='air' for p in ray):
+                        aim=b
+                        break
+                if aim is None:
+                    continue
             stop_movement()
-            self.rcon.command(f'player {self.bot} look at {x+.5:.2f} {y+.5:.2f} {z+.5:.2f}')
+            self.rcon.command(f'player {self.bot} look at {aim[0]:.2f} {aim[1]:.2f} {aim[2]:.2f}')
             result=self.rcon.command(f'player {self.bot} attack continuous')
             if any(term in result.lower() for term in ('unknown', 'incorrect argument', 'failed')):
                 raise TerrainUnavailable('Carpet mining action unavailable: '+result)
@@ -97,6 +120,11 @@ class BlockBreaker:
             return True
         self.cooldown_until=now+3.
         return False
+
+    def try_exact(self, bot, block, now, *, stop_movement, allowed_blocks, extra_blocks=()):
+        x,y,z=block
+        return self.try_start(bot,Position(x+.5,float(y),z+.5),now,
+                              stop_movement=stop_movement,allowed_blocks=allowed_blocks,exact=block,extra_blocks=extra_blocks)
 
     def tick(self, now: float) -> bool:
         """True while mining owns controls, False when bot can navigate again."""

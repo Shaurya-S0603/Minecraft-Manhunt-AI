@@ -32,7 +32,7 @@ _PASSABLE = frozenset("""air cave_air void_air short_grass grass tall_grass fern
  pale_hanging_moss pale_moss_carpet moss_carpet spore_blossom
  lilac peony rose_bush sunflower torchflower pitcher_plant cactus_flower
  wheat carrots potatoes beetroots nether_wart melon_stem pumpkin_stem
- attached_melon_stem attached_pumpkin_stem""".split())
+ attached_melon_stem attached_pumpkin_stem nether_portal end_portal""".split())
 # Carpets sit slightly above their supporting block, but shouldn't make
 # walking impossible. They are NOT safe ground by themselves.
 _WATER = frozenset('water bubble_column seagrass tall_seagrass kelp kelp_plant'.split())

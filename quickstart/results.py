@@ -56,7 +56,7 @@ def show_round_result(rcon, result: RoundResult, session_score: str | None = Non
     rcon.command(f'tellraw {name} {component("[Manhunt] " + result.headline + " " + result.description, color, True)}')
     if session_score:
         rcon.command(f'tellraw {name} {component("[SESSION] " + session_score, "yellow")}')
-    rcon.command(f'tellraw {name} {component("Play again: /trigger mh_replay | Switch roles: /trigger mh_switch", "aqua")}')
+    rcon.command(f'tellraw {name} {component("Play again with /trigger mh_replay", "aqua")}')
     rcon.command(f'tellraw {name} {component("The server stays running. Your world is not reset between rounds.", "gray")}')
 
 

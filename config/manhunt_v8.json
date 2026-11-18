@@ -1,0 +1,50 @@
+{
+  "game": {
+    "default_human_role": "runner",
+    "head_start_seconds": 20,
+    "survival_seconds": 180,
+    "hit_to_win": true
+  },
+  "tracking": {
+    "enabled": true,
+    "mode": "coordinates",
+    "range_blocks": 128,
+    "cooldown_seconds": 5,
+    "last_known_seconds": 25,
+    "reveal_exact_coordinates_to_hunter": true
+  },
+  "inventory": {
+    "enabled": true,
+    "poll_seconds": 2.5,
+    "slots": 36,
+    "save_between_matches": true
+  },
+  "resources": {
+    "enabled": true,
+    "gather_when_runner": true,
+    "gather_when_hunter": false,
+    "minimum_distance_from_hunter": 18,
+    "cooldown_seconds": 5,
+    "target_log_count": 8,
+    "allowed_blocks": [
+      "oak_log",
+      "spruce_log",
+      "birch_log",
+      "jungle_log",
+      "acacia_log",
+      "dark_oak_log",
+      "mangrove_log",
+      "cherry_log",
+      "pale_oak_log",
+      "dirt",
+      "grass_block"
+    ],
+    "search_radius": 4,
+    "objective_timeout": 18
+  },
+  "scoring": {
+    "hunter_hit_points": 100,
+    "runner_survival_points": 100,
+    "runner_survival_bonus_per_30_seconds": 5
+  }
+}

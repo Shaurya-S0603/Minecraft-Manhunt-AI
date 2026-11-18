@@ -26,6 +26,11 @@ from .terrain import terrain_type
 from .live_skill_policy import LiveSkillPolicy
 from .strategy import StrategyAdvisor
 from .install import SERVER
+from .v8_config import load_config
+from .v8_inventory import InventoryMonitor
+from .v8_resources import ResourceCollector
+from .v8_tracking import CoordinateTracker
+from .v8_inventory_events import InventoryEventBridge
 
 BOT_NAME = 'ManhuntBot'
 
@@ -39,12 +44,14 @@ def command_ok(response: str) -> bool:
 
 
 class ManhuntMatch:
-    def __init__(self, rcon, role: str, head_start: int = 20, survival_seconds: int = 180):
+    def __init__(self, rcon, role: str, head_start: int = 20, survival_seconds: int = 180, v8_config=None):
         if role not in ('hunter', 'runner'):
             raise ValueError('Role must be hunter or runner')
         if not 0 <= head_start <= 300 or not 15 <= survival_seconds <= 86400:
             raise ValueError('Invalid match durations')
         self.rcon, self.role = rcon, role
+        self.v8_config = v8_config or load_config()
+        self.tracker = CoordinateTracker(self.v8_config['tracking'])
         self.ai_role = 'runner' if role == 'hunter' else 'hunter'
         self.brain = DecisionLoop(BOT_NAME, self.ai_role)
         self.strategy = StrategyAdvisor(self.ai_role)
@@ -56,6 +63,7 @@ class ManhuntMatch:
         self.attacking = False
         self.target = None
         self.last_bot_position = None
+        self.last_human_position = None
         self.last_progress = time.monotonic()
         self.last_jumped = 0.0
         self.random = random.Random()
@@ -84,6 +92,9 @@ class ManhuntMatch:
         self.climb_key = None
         self.jump_key = None
         self.miner = BlockBreaker(rcon, self.sensor, self.bot)
+        self.inventory = None  # Start monitoring only after the fake player exists.
+        self.inventory_events = None
+        self.collector = None
         self.hit_detector = None
         self.last_attack = 0.0
         self.failed_routes = 0
@@ -120,6 +131,10 @@ class ManhuntMatch:
         self.detour_budget_goal: Position | None = None
         self.detour_budget_used = 0
         self.detour_exhausted_reported = False
+        self.escape_threat = None
+        self.escape_last_choice = -1e12
+        self.headstart_origin = None
+        self.escape_replans = 0
 
     def players(self) -> list[str]:
         return parse_player_list(self.rcon.command('list'))
@@ -216,6 +231,16 @@ class ManhuntMatch:
         self.last_route_at = 0.0
         self.last_progress = time.monotonic()
         print('[SPAWN] Verified AI has safe ground and three clear blocks of headroom.')
+        if self.v8_config['inventory']['enabled']:
+            self.inventory = InventoryMonitor(
+                self.rcon, self.bot, SERVER.parent / 'inventory' / self.bot,
+                poll_seconds=self.v8_config['inventory']['poll_seconds'],
+                persist=self.v8_config['inventory']['save_between_matches'])
+            self.inventory.snapshot(force=True)
+            if self.inventory.available is True:
+                print(f'[INVENTORY] Native inventory readable; {len(self.inventory.slots)}/36 occupied main slots.')
+            self.collector = ResourceCollector(
+                self.inventory, self.miner, self.sensor, self.v8_config['resources'])
         print('[BOT] ManhuntBot is in the world.')
 
     def stop(self):
@@ -397,7 +422,21 @@ class ManhuntMatch:
             return True
         return reached_waypoint(bot, step.destination, previous)
 
-    def navigate(self, bot: Position, target: Position, now: float):
+    def invalidate_route(self):
+        """Switch objectives without continuing the previous route or jump."""
+        self.path=()
+        self.path_index=0
+        self.path_goal=None
+        self.path_created_at=-1e12
+        self.waypoint_key=None
+        self.jump_controller.clear()
+        self.jump_preflight_key=None
+        self.detour_active=False
+        self.recovery_until=0.0
+        self.target=None
+        self.last_progress=time.monotonic()
+
+    def navigate(self, bot: Position, target: Position, now: float, *, escape_from=None):
         """Follow rolling 3D A* waypoints using physical Carpet movement."""
         try:
             if self._handle_airborne(bot,now):
@@ -456,7 +495,8 @@ class ManhuntMatch:
             # After repeated failures prefer a real, verified opening over
             # endlessly tracing the same blocked path. Mining stays limited to
             # ordinary, nearby materials and never edits blocks directly.
-            if self.failed_routes >= 2 and not self.water.swimming:
+            if (self.failed_routes >= 2 and not self.water.swimming and
+                    not (self.collector is not None and self.collector.goal is not None)):
                 try:
                     if self.miner.try_start(bot,target,now,stop_movement=self.stop):
                         self.recovery_until=0.0
@@ -504,7 +544,7 @@ class ManhuntMatch:
         if self.detour_active and self.path and self.path_index >= len(self.path):
             self.detour_active = False
             self.path_created_at = 0.0
-            print('[NAV DETOUR] Verified sidestep completed; resuming pursuit planning.')
+            print('[NAV DETOUR] Verified sidestep completed; replanning current objective.')
         # Failed/no-route plans have a cooldown: repeated 1690-block scans on
         # every 0.16s movement tick can itself stall the Minecraft server.
         needs_plan = ((not self.path and now-self.path_created_at > 2.5)
@@ -526,7 +566,7 @@ class ManhuntMatch:
                 # Max four distinct detours per 30 seconds/goal region, and
                 # never through unknown blocks, lava or unsafe cliff edges.
                 if (self.detour_budget_start == 0.0 or
-                        now-self.detour_budget_start >= 30.0 or
+                        now-self.detour_budget_start >= (10.0 if escape_from is not None else 30.0) or
                         (self.detour_budget_goal is not None and
                          self.detour_budget_goal.distance(target) > 8.0)):
                     self.detour_budget_start = now
@@ -535,12 +575,14 @@ class ManhuntMatch:
                     self.detour_exhausted_reported = False
                 self.detour_recent = {node:expires for node,expires in self.detour_recent.items()
                                       if expires > now}
-                detour_allowed = (self.failed_routes >= 1 and
+                detour_allowed = ((self.failed_routes >= 1 or escape_from is not None) and
                                   self.detour_budget_used < 4)
-                plan = self.pathfinder.plan(
-                    bot,target,avoid_water=self.ai_role=='runner',
-                    allow_detour=detour_allowed,
-                    detour_exclude=frozenset(self.detour_recent))
+                kwargs = {'avoid_water':self.ai_role=='runner',
+                          'allow_detour':detour_allowed,
+                          'detour_exclude':frozenset(self.detour_recent)}
+                if escape_from is not None:
+                    kwargs['escape_from']=escape_from
+                plan = self.pathfinder.plan(bot,target,**kwargs)
                 self.path = plan.steps
                 self.jump_controller.clear()
                 self.jump_preflight_key=None
@@ -612,8 +654,8 @@ class ManhuntMatch:
                 if (self.detour_budget_used >= 4 and
                         not self.detour_exhausted_reported):
                     print('[NAV WARNING] Verified detour budget exhausted; '
-                          'no safe route to opponent in observed local region. '
-                          'Will retry when the goal region or terrain changes.')
+                          'no verified route to the current goal in observed local region. '
+                          'Will retry after the recovery window or a changed goal.')
                     self.detour_exhausted_reported = True
                 # Water-landings are opt-in practice until three or more
                 # real successful water-drop trials certify this skill.
@@ -635,7 +677,8 @@ class ManhuntMatch:
                         pass
                 # Two unsuccessful route scans permit a *physical*, bounded
                 # attempt to clear an allowlisted obstruction. Never /setblock.
-                if self.failed_routes >= 2 and not self.water.swimming:
+                if (self.failed_routes >= 2 and not self.water.swimming and
+                    not (self.collector is not None and self.collector.goal is not None)):
                     try:
                         if self.miner.try_start(bot,target,now,stop_movement=self.stop):
                             self.path_created_at=now
@@ -762,9 +805,24 @@ class ManhuntMatch:
         human = self.observer.position(self.player)
         bot = self.observer.position(self.bot)
         dist = bot.distance(human)
+        # Spectator camera motion is not a moving threat; the Hunter returns
+        # to this fixed starting point after the countdown.
+        threat = self.headstart_origin if self.headstart_origin is not None else human
         now = time.monotonic()
+        if self.inventory is not None:
+            self.inventory.snapshot()
         self.motion.observe(bot,now)  # Real observed positions, never guessed velocity.
-        self.strategy.observe(bot,human,now)
+        # Never train the hunter's strategy on exact coordinates beyond its
+        # configured tracking range. Nearby physical hit checks stay separate.
+        observed_opponent = (self.tracker.sample(bot, human, now)
+                             if self.ai_role == 'hunter' and self.v8_config['tracking']['enabled']
+                             else human)
+        if self.collector is not None and self.collector.goal is not None:
+            self.strategy.suspend_unroutable()
+        if observed_opponent is not None:
+            self.strategy.observe(bot, threat if self.ai_role=='runner' else observed_opponent, now)
+        else:
+            self.strategy.suspend_unroutable()
         if self.training.trial is not None:
             # A true supported landing, or entering real water for a water drop.
             try:
@@ -780,6 +838,7 @@ class ManhuntMatch:
         if self.last_bot_position is None:
             self.last_progress = now
         self.last_bot_position = bot
+        self.last_human_position = human
         # Physical proximity is not a win. Only the Scarpet damage event can
         # confirm a hit from the actual Hunter against the actual Runner.
         if self.hit_detector is not None and self.hit_detector.hunter_hit(self.role):
@@ -820,6 +879,9 @@ class ManhuntMatch:
                         self.surface_goal=(self.surface_planner.find_air(bot)
                                            or self.surface_planner.ascend_waypoint(bot))
                         self.surface_goal_at=now
+                    if self.collector is not None and self.collector.goal is not None:
+                        self.collector.cancel(now,self.stop,'Abandoned harvest: emergency surfacing.')
+                        self.invalidate_route()
                     if self.surface_goal is not None:
                         self.navigate(bot,self.surface_goal,now)
                     else:
@@ -835,6 +897,21 @@ class ManhuntMatch:
                 print('[SWIM WARNING] Air/water sensing unavailable:', exc)
                 self.warned_sensor=True
             return None
+        if self.collector is not None:
+            old_goal=self.collector.goal
+            # A gather operation must keep ownership even while its own miner
+            # is busy. Otherwise normal A* ticks it and pickup is never checked.
+            def gather_nav(origin, destination, timestamp):
+                if self.path_goal is not None and self.path_goal.distance(destination)>.65:
+                    self.invalidate_route()
+                self.navigate(origin,destination,timestamp)
+            if self.collector.try_gather(bot, threat, self.ai_role, now, self.stop,
+                                         navigate=gather_nav, unsafe=submerged or self.airborne or self.training.trial is not None):
+                self.strategy.suspend_unroutable()
+                self.target=None
+                return None
+            if old_goal is not None:
+                self.invalidate_route()
         if self.ai_role == 'hunter' and dist <= 2.8:
             try:
                 if attack_line_clear(self.sensor, bot, human):
@@ -848,26 +925,46 @@ class ManhuntMatch:
         decision = self.brain.handle_observation(Observation(
             player_id=self.bot,
             position=(bot.x, bot.y, bot.z),
-            visible_entities={opponent: (human.x, human.y, human.z)},
+            visible_entities=({opponent: ((threat if self.ai_role=='runner' else observed_opponent).x,
+                                          (threat if self.ai_role=='runner' else observed_opponent).y,
+                                          (threat if self.ai_role=='runner' else observed_opponent).z)}
+                              if observed_opponent is not None else {}),
         ))
         if self.ai_role == 'hunter':
             if decision is not None and decision.target is not None:
                 # Strategic decisions adjust only the bounded *goal*. They do
                 # not bypass A*, safety sampling, damage-hit checks, or air.
-                tactical=self.strategy.hunt(bot,human,now)
+                # Tracker is range/cooldown bounded for strategic movement.
+                known = observed_opponent
+                if known is None:
+                    self.halt_movement()
+                    return None
+                tactical=self.strategy.hunt(bot,known,now)
                 self.target=tactical.target
                 self.navigate(bot,self.target,now)
             else:
                 self.halt_movement()
         else:
-            if self.target is None or bot.distance(self.target)<3 or now-self.last_progress>5:
+            # Update a stale escape direction when the Hunter moves around us.
+            stale=(self.target is not None and
+                   math.hypot(self.target.x-threat.x,self.target.z-threat.z) <=
+                   math.hypot(bot.x-threat.x,bot.z-threat.z)+1.0)
+            blocked=(not self.path and self.failed_routes>0 and now-self.escape_last_choice>=2.5)
+            changed=(self.escape_threat is not None and self.escape_threat.distance(threat)>5)
+            if (self.target is None or bot.distance(self.target)<3 or
+                    (now-self.escape_last_choice>=2.5 and (stale or blocked or changed or now-self.last_progress>5))):
+                if stale or blocked or changed:
+                    self.strategy.suspend_unroutable()
+                    self.escape_replans+=1
                 if decision is not None and decision.name=='retreat' and decision.target is not None:
                     baseline=Position.from_tuple(tuple(decision.target))
                 else:
-                    baseline=self.escape_target(bot,human)
-                tactical=self.strategy.escape(bot,human,now,baseline)
+                    baseline=self.escape_target(bot,threat)
+                tactical=self.strategy.escape(bot,threat,now,baseline)
                 self.target=tactical.target
-            self.navigate(bot,self.target,now)
+                self.escape_last_choice=now
+                self.escape_threat=threat
+            self.navigate(bot,self.target,now,escape_from=threat)
         return None
 
     def movement_tick_delay(self) -> float:
@@ -884,6 +981,12 @@ class ManhuntMatch:
         self.setup_bot()
         self.hit_detector = HitDetector(self.rcon, SERVER / "world", self.player, self.bot)
         self.hit_detector.setup()
+        if self.inventory is not None:
+            self.inventory_events = InventoryEventBridge(self.rcon, SERVER / 'world', self.bot)
+            try:
+                self.inventory_events.setup()
+            except (OSError, ValueError) as exc:
+                print('[INVENTORY] Optional Scarpet event listener unavailable:', exc)
         print(f'[MATCH] You are {self.role.upper()}; ManhuntBot is {self.ai_role.upper()}')
         print(f'[STRATEGY] Bounded tactical decisions: {self.strategy.status()}')
         print('[MATCH] Win condition: a confirmed Hunter melee hit, or Runner survives the timer.')
@@ -891,6 +994,7 @@ class ManhuntMatch:
         if self.role == 'hunter':
             self.rcon.command(f'gamemode spectator {self.player}')
             self.hunter_was_spectator = True
+            self.headstart_origin = initial_hunter_position
             print('[MATCH] Human Hunter is spectator during head start; position restored when it ends.')
         try:
             start = time.monotonic()
@@ -912,7 +1016,9 @@ class ManhuntMatch:
                 self.hunter_was_spectator = False
             self.hit_detector.reset()  # Ignore anything during head start.
             show_match_start(self.rcon, self.player, self.role)
+            self.headstart_origin=None
             print('[MATCH] GO! The Hunter is now released.')
+            self.tracker.last_refresh = -1e12  # New round tracking window.
             game_start = time.monotonic()
             last_report = 0.0
             while True:
@@ -934,6 +1040,13 @@ class ManhuntMatch:
                     winner = 'runner'
                     break
                 winner = self.step()
+                if (self.role == 'hunter' and self.v8_config['tracking']['enabled']
+                        and self.last_human_position is not None
+                        and self.last_bot_position is not None):
+                    hint = self.tracker.message(self.last_human_position,
+                                                self.last_bot_position, time.monotonic())
+                    if hint:
+                        self.rcon.command(f'tellraw {self.player} {component(hint, "gold")}')
                 if winner:
                     self.result_reason = 'hit'
                     break
@@ -946,13 +1059,18 @@ class ManhuntMatch:
             self.game_duration = time.monotonic() - game_start
             print(f'\n[RESULT] {winner.upper()} wins the HIT MANHUNT!')
             print(f'[NAV] 3D plans={self.path_replans}, sensor failures={self.nav_failures}, stuck recoveries={self.recovery_attempts}, mined={self.miner.successes}, emergency-air={self.water.emergency_count}, spawn retries={self.spawn_retries}, zero-route={self.empty_route_scans}, verified-detours={self.detour_routes}, skipped-strategy-stationary={self.strategy.skipped_stationary}, skipped-strategy-unroutable={self.strategy.skipped_unroutable}')
+            if self.collector is not None:
+                print('[RESOURCE SUMMARY] '+self.collector.status()+f'; escape goal refreshes={self.escape_replans}')
             return winner
         finally:
+            self.headstart_origin=None
             if self.training.trial is not None:
                 try:
                     self.training.finish(False,self.observer.position(self.bot),time.monotonic())
                 except Exception:
                     pass
+            if self.inventory is not None:
+                self.inventory.snapshot(force=True)
             self.miner.stop()
             self.stop()
             if self.hunter_was_spectator and self.player:

@@ -1,7 +1,7 @@
 """A server-resident post-match lobby with no client mod or OP permissions needed.
 
-Players use vanilla /trigger to request another round or switch roles.
-Console can accept R (replay), S (switch), or Q (shut down).
+Players use vanilla /trigger to request another round.
+The console accepts R (replay) or Q (shut down).
 """
 from __future__ import annotations
 import queue
@@ -13,7 +13,6 @@ from .observations import validate_name
 from .results import component
 
 REPLAY = 'mh_replay'
-SWITCH = 'mh_switch'
 _SCORE_RE = re.compile(r'\bhas\s+(-?\d+)\s+\[')
 
 
@@ -40,15 +39,13 @@ class Lobby:
 
     def setup(self):
         # If this server has already hosted a Manhunt session, the objectives exist.
-        for objective in (REPLAY, SWITCH):
-            self.rcon.command(f'scoreboard objectives add {objective} trigger')
+        self.rcon.command(f'scoreboard objectives add {REPLAY} trigger')
 
     def prepare_player(self, player: str):
         player = validate_name(player)
-        for objective in (REPLAY, SWITCH):
-            # Zero the previous session's score before re-enabling the trigger.
-            self.rcon.command(f'scoreboard players set {player} {objective} 0')
-            self.rcon.command(f'scoreboard players enable {player} {objective}')
+        # Zero the previous session's score before re-enabling the trigger.
+        self.rcon.command(f'scoreboard players set {player} {REPLAY} 0')
+        self.rcon.command(f'scoreboard players enable {player} {REPLAY}')
 
     def clear_pending_console(self):
         while True:
@@ -59,25 +56,24 @@ class Lobby:
 
     def poll_action(self, player: str) -> str | None:
         player = validate_name(player)
-        for objective, action in ((SWITCH, 'switch'), (REPLAY, 'replay')):
-            try:
-                score = parse_score(self.rcon.command(f'scoreboard players get {player} {objective}'))
-            except (OSError, ValueError):
-                score = None
-            if score is not None and score >= 1:
-                self.rcon.command(f'scoreboard players set {player} {objective} 0')
-                return action
+        try:
+            score = parse_score(self.rcon.command(f'scoreboard players get {player} {REPLAY}'))
+        except (OSError, ValueError):
+            score = None
+        if score is not None and score >= 1:
+            self.rcon.command(f'scoreboard players set {player} {REPLAY} 0')
+            return 'replay'
         try:
             choice = self.console_queue.get_nowait()
         except queue.Empty:
             return None
-        return {'r':'replay','replay':'replay', 's':'switch', 'switch':'switch', 'q':'quit', 'quit':'quit'}.get(choice)
+        return {'r':'replay','replay':'replay', 'q':'quit', 'quit':'quit'}.get(choice)
 
     def wait_for_next_round(self, player: str, server_proc=None, poll_seconds: float = 1.0) -> str:
         player = validate_name(player)
         print('\n[LOBBY] Match ended, Minecraft server remains ONLINE.')
-        print('[LOBBY] IN GAME: /trigger mh_replay   OR   /trigger mh_switch')
-        print('[LOBBY] IN CONSOLE: R replay, S switch sides, Q gracefully stop server.')
+        print('[LOBBY] IN GAME: /trigger mh_replay')
+        print('[LOBBY] IN CONSOLE: R replay, Q gracefully stop server.')
         last_reminder = time.monotonic()
         while True:
             if server_proc is not None and server_proc.poll() is not None:
@@ -88,7 +84,7 @@ class Lobby:
             if time.monotonic() - last_reminder > 40:
                 # Only the action bar is refreshed; the central result screen can fade normally.
                 try:
-                    self.rcon.command(f'title {player} actionbar {component("/trigger mh_replay  |  /trigger mh_switch", "aqua")}')
+                    self.rcon.command(f'title {player} actionbar {component("/trigger mh_replay", "aqua")}')
                 except OSError:
                     pass
                 last_reminder = time.monotonic()

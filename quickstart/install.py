@@ -62,8 +62,9 @@ def download_to(url: str, destination: Path, max_bytes: int, sha512: str | None 
     destination.with_suffix(destination.suffix+'.partial').replace(destination)
 
 
-def install_fabric():
-    target = SERVER / 'fabric-server.jar'
+def install_fabric(server=None):
+    server = SERVER if server is None else server
+    target = server / 'fabric-server.jar'
     if target.exists() and target.stat().st_size > 10000:
         print('[READY] Fabric launcher already exists')
         return
@@ -80,13 +81,14 @@ def install_fabric():
     print('[FABRIC]', stable_loaders[0], 'launcher', stable_installers[0])
 
 
-def install_mod(project_id: str, label: str):
-    mods = SERVER/'mods'
+def install_mod(project_id: str, label: str, server=None, *, version=None):
+    server = SERVER if server is None else server
+    mods = server/'mods'
     marker = mods/f'manhunt-{project_id}.install.json'
     if marker.exists():
         try:
             details = json.loads(marker.read_text(encoding='utf-8'))
-            if (mods/details['filename']).is_file():
+            if (version is None or details.get('version') == version) and (mods/details['filename']).is_file():
                 print('[READY]', label, 'already installed')
                 return
         except (ValueError, KeyError, OSError):
@@ -96,9 +98,10 @@ def install_mod(project_id: str, label: str):
         'game_versions': json.dumps([MINECRAFT_VERSION]),
     })
     versions = json_get(f'{MODRINTH}/project/{project_id}/version?{query}')
-    releases = [v for v in versions if v.get('version_type') == 'release']
+    releases = [v for v in versions if v.get('version_type') == 'release'
+                and (version is None or v.get('version_number') == version)]
     if not releases:
-        raise SetupError(f'No release of {label} for Fabric {MINECRAFT_VERSION}')
+        raise SetupError(f"No release of {label} {version or ''} for Fabric {MINECRAFT_VERSION}")
     best = max(releases, key=lambda item: item['date_published'])
     primary = next((f for f in best['files'] if f.get('primary')), best['files'][0])
     filename = primary['filename']
@@ -112,9 +115,10 @@ def install_mod(project_id: str, label: str):
     print('[MOD]', label, best['version_number'])
 
 
-def ensure_properties():
-    SERVER.mkdir(parents=True, exist_ok=True)
-    path = SERVER/'server.properties'
+def ensure_properties(server=None, *, game_port=25565, rcon_port=25575, overrides=None):
+    server = SERVER if server is None else server
+    server.mkdir(parents=True, exist_ok=True)
+    path = server/'server.properties'
     properties = {}
     if path.exists():
         for line in path.read_text(encoding='utf-8').splitlines():
@@ -124,14 +128,16 @@ def ensure_properties():
     if properties.get('level-name','world') not in ('world',):
         raise SetupError('Refusing to modify custom world-level name: use a fresh test-server directory')
     properties.update({
-        'server-ip':'127.0.0.1', 'server-port':'25565',
+        'server-ip':'127.0.0.1', 'server-port':str(game_port),
         'online-mode':'true', 'white-list':'false',
-        'enable-rcon':'true', 'rcon.port':'25575',
+        'enable-rcon':'true', 'rcon.port':str(rcon_port),
         'max-players':'8', 'motd':'Local Minecraft AI Manhunt test',
         'level-name':'world', 'gamemode':'survival', 'difficulty':'normal',
         'spawn-protection':'0', 'enable-command-block':'false',
         'enforce-secure-profile':'true',
     })
+    if overrides:
+        properties.update(overrides)
     # Never carry a bundled or user-supplied password into a public config.
     if not properties.get('rcon.password') or properties['rcon.password'] in ('changeme','password'):
         properties['rcon.password'] = secrets.token_urlsafe(32)
@@ -139,8 +145,9 @@ def ensure_properties():
     return properties
 
 
-def eula_agreement():
-    target = SERVER/'eula.txt'
+def eula_agreement(server=None):
+    server = SERVER if server is None else server
+    target = server/'eula.txt'
     if target.exists() and re.search(r'(?m)^eula=true\s*$',target.read_text(encoding='utf-8')):
         return
     print('\n[MINECRAFT EULA] You must personally review and accept the Minecraft EULA:')
