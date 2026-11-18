@@ -1,9 +1,11 @@
-# Test policy
+# Test plan and fixtures
 
-Import the exact working v0.6 source before claiming CI validates gameplay. Required validations after import:
-- Python quickstart unit tests
-- Original Python regression/contract tests
-- Node adapter tests when applicable
-- Safe-spawn, terrain-sensing, physical navigation, drowning safeguard, mining and damage-event regression tests
+Every `.py` test file is comments-only. The integration tests require a disposable Minecraft 1.21.11 server with no personal saves.
 
-A green initial setup workflow means only that the repository structure is valid. It does not confirm that the game works.
+## Test ordering
+
+Unit tests → adapter contract tests → movement integration tests → head start and reset tests → end-to-end survival match.
+
+## Isolation
+
+Never point reset tests at an existing user world. Create a separate, allowlisted root for destructive tests.

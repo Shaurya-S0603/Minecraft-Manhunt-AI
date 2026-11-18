@@ -1,0 +1,7 @@
+# Explanation-only placeholder: Transport and server communication
+# No actual TOML keys, dotenv assignments, credentials, or settings are provided.
+# Network endpoints for trusted local adapter/bridge peers.
+# Heartbeat, action timeout, reconnect budget, and queue bounds.
+# RCON information when needed, loaded from an external secret source.
+# Bind to loopback until proper authentication and isolation exist.
+# Implementation task: create real settings and validation after establishing the data contracts.

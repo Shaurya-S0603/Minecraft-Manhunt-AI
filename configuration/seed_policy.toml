@@ -1,0 +1,7 @@
+# Explanation-only placeholder: Seed generation and world policy
+# No actual TOML keys, dotenv assignments, credentials, or settings are provided.
+# Random, reuse, fixed, or scored seed selection.
+# Weights for spawn safety, resource access, structure access, terrain diversity, navigability.
+# Candidate count, quality threshold, world backup retention.
+# Allowed server data root for all world archives or replacements.
+# Implementation task: create real settings and validation after establishing the data contracts.

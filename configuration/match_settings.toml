@@ -1,0 +1,8 @@
+# Explanation-only placeholder: Match gameplay settings
+# No actual TOML keys, dotenv assignments, credentials, or settings are provided.
+# Human role and opposing AI role; optional AI-vs-AI test mode.
+# Starting delay in seconds, tracking mode and difficulty.
+# Game mode: survival duration or explicit completion win condition.
+# Respawn, spectator, disconnection, and tie-handling rules.
+# All settings must be validated and authorized by the server.
+# Implementation task: create real settings and validation after establishing the data contracts.

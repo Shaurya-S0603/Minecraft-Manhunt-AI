@@ -1,0 +1,19 @@
+{
+  "name": "minecraft-manhunt-mineflayer-adapter",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Minecraft Manhunt Mineflayer adapter for the versioned AI controller contract",
+  "main": "src/index.js",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "node test/adapter.test.js",
+    "check": "node --check src/index.js && node --check src/protocol.js"
+  },
+  "dependencies": {
+    "mineflayer": "4.39.0",
+    "mineflayer-pathfinder": "2.4.5"
+  }
+}

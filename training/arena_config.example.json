@@ -1,0 +1,98 @@
+{
+  "schema": 1,
+  "stages": [
+    {
+      "name": "gap_1",
+      "skill": "sprint_jump",
+      "start": [
+        1.5,
+        220.0,
+        0.5
+      ],
+      "target": [
+        7.5,
+        220.0,
+        0.5
+      ],
+      "seconds": 5.5,
+      "takeoff": [
+        5.5,
+        220.0,
+        0.5
+      ],
+      "gap": 1
+    },
+    {
+      "name": "gap_2",
+      "skill": "sprint_jump",
+      "start": [
+        1.5,
+        220.0,
+        20.5
+      ],
+      "target": [
+        8.5,
+        220.0,
+        20.5
+      ],
+      "seconds": 5.5,
+      "takeoff": [
+        5.5,
+        220.0,
+        20.5
+      ],
+      "gap": 2
+    },
+    {
+      "name": "gap_3",
+      "skill": "sprint_jump",
+      "start": [
+        1.5,
+        220.0,
+        40.5
+      ],
+      "target": [
+        9.5,
+        220.0,
+        40.5
+      ],
+      "seconds": 5.5,
+      "takeoff": [
+        5.5,
+        220.0,
+        40.5
+      ],
+      "gap": 3
+    },
+    {
+      "name": "swim_horizontal",
+      "skill": "swim",
+      "start": [
+        1.5,
+        217.0,
+        80.5
+      ],
+      "target": [
+        15.5,
+        217.0,
+        80.5
+      ],
+      "seconds": 9.0
+    },
+    {
+      "name": "ladder_up",
+      "skill": "climb",
+      "start": [
+        5.5,
+        220.0,
+        100.5
+      ],
+      "target": [
+        5.5,
+        226.0,
+        100.5
+      ],
+      "seconds": 9.0
+    }
+  ]
+}

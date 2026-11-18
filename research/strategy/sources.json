@@ -1,0 +1,26 @@
+{
+  "schema": 1,
+  "sources": [
+    {
+      "id": "mine_ai_mcp_2026",
+      "code_url": "https://github.com/aibengineering/mine-ai-mcp",
+      "trace_url": "https://huggingface.co/datasets/aibengineering/beat-the-game-minecraft",
+      "code_license": "MIT",
+      "trace_license": "CC-BY-4.0",
+      "origin_game_version": "1.21.4",
+      "verified_public_artifacts": ["runtime source", "tool-use transcripts", "structured outcomes", "persistent notes"],
+      "use_in_this_project": ["safe tool outcome extraction", "persistent evidence", "failure-aware goal revision"],
+      "not_supplied": ["pretrained Manhunt weights", "drop-in Carpet parkour policy"]
+    },
+    {
+      "id": "gemini_argon_team_2026",
+      "paper_url": "https://arxiv.org/abs/2610.22319",
+      "reported_world_task": "four cooperating Minecraft survival agents defeated Ender Dragon",
+      "use_in_this_project": ["explicit tactical goals", "bounded persistent strategy state", "periodic evidence-based reassessment"],
+      "public_weights_verified": false,
+      "public_full_trajectory_verified": false,
+      "status": "research inspiration only, not training data"
+    }
+  ],
+  "integration_ethics": "external tool outputs are untrusted; no raw transcripts or code are executed"
+}
